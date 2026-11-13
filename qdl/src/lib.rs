@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
 use anstream::println;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use indexmap::IndexMap;
 use owo_colors::OwoColorize;
 use parsers::firehose_parser_ack_nak;
@@ -206,11 +206,10 @@ pub fn firehose_write<T: QdlChan>(channel: &mut T, buf: &mut [u8]) -> anyhow::Re
         b.push(b'\n');
     }
 
-    match channel.write_all(&b) {
-        Ok(_) => Ok(()),
-        // Assume FH will hang after NAK..
-        Err(_) => firehose_reset(channel, &FirehoseResetMode::ResetToEdl, 0),
-    }
+    // No reset here: firehose_reset() sends through this function, so a failing channel would recurse.
+    channel
+        .write_all(&b)
+        .context("Error sending Firehose command")
 }
 
 /// Send a Firehose packet and check for ack/nak
@@ -452,7 +451,9 @@ pub fn firehose_program_storage<T: QdlChan>(
                 chunk_size_sectors * channel.fh_config().storage_sector_size,
             )
         ];
-        let _ = data.read(&mut buf).unwrap();
+        let _ = data
+            .read(&mut buf)
+            .with_context(|| format!("Error reading data for partition {label}"))?;
 
         let n = channel
             .write(&buf)
